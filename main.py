@@ -34,37 +34,50 @@ def fetch_ibkr_xml():
 def process_and_send(xml_content):
     root = ET.fromstring(xml_content)
     
-    # 1. Find NAV
+    # 1. Get NAV (Net Asset Value)
     nav_node = root.find(".//NetAssetValueNAVInBase")
     total_nav = float(nav_node.get("total")) if nav_node is not None else 0.0
 
-    # 2. Extract Contributors
+    # 2. Extract Performance Data
     perf_data = []
-    # Using the exact tag from your IBKR configuration
+    # Search for performance rows
     for node in root.findall(".//RealizedUnrealizedPerformanceSummaryInBase"):
         symbol = node.get('symbol')
-        if symbol and symbol != 'Total':
+        # Ensure it's a specific symbol row and not a 'Total' summary row
+        if symbol and symbol.strip() and symbol != 'Total':
             realized = float(node.get('totalRealizedPnl') or 0)
             unrealized = float(node.get('totalUnrealizedPnl') or 0)
             perf_data.append({'symbol': symbol, 'pnl': realized + unrealized})
 
-    df = pd.DataFrame(perf_data)
-    total_pnl = df['pnl'].sum()
-    
-    # 3. Format Message
-    msg = f"📉 *Daily IBKR Report*\n━━━━━━━━━━━━━━━\n"
-    msg += f"🏦 *NAV:* ${total_nav:,.2f}\n"
-    msg += f"💰 *PnL:* {'+' if total_pnl > 0 else ''}${total_pnl:,.2f}\n\n"
-    
-    msg += "*Top Contributors:*\n"
-    for _, r in df.nlargest(3, 'pnl').iterrows():
-        msg += f"• {r['symbol']}: +${r['pnl']:,.2f}\n"
+    # 3. Handle Empty Data Case
+    if not perf_data:
+        msg = f"📉 *Daily IBKR Report*\n━━━━━━━━━━━━━━━\n"
+        msg += f"🏦 *NAV:* ${total_nav:,.2f}\n"
+        msg += f"ℹ️ _No symbol-level performance data found for this period._"
+    else:
+        df = pd.DataFrame(perf_data)
+        total_pnl = df['pnl'].sum()
+        
+        # 4. Format Message with Top Movers
+        msg = f"📉 *Daily IBKR Report*\n━━━━━━━━━━━━━━━\n"
+        msg += f"🏦 *NAV:* ${total_nav:,.2f}\n"
+        msg += f"💰 *PnL:* {'+' if total_pnl >= 0 else ''}${total_pnl:,.2f}\n\n"
+        
+        # Get up to 3 winners/losers (using min to avoid errors if < 3 exist)
+        num_winners = min(3, len(df[df['pnl'] > 0]))
+        num_losers = min(3, len(df[df['pnl'] < 0]))
 
-    msg += "\n*Top Detractors:*\n"
-    for _, r in df.nsmallest(3, 'pnl').iterrows():
-        msg += f"• {r['symbol']}: -${abs(r['pnl']):,.2f}\n"
+        if num_winners > 0:
+            msg += "*Top Contributors:*\n"
+            for _, r in df.nlargest(num_winners, 'pnl').iterrows():
+                msg += f"• {r['symbol']}: +${r['pnl']:,.2f}\n"
 
-    # 4. Send to Telegram
+        if num_losers > 0:
+            msg += "\n*Top Detractors:*\n"
+            for _, r in df.nsmallest(num_losers, 'pnl').iterrows():
+                msg += f"• {r['symbol']}: -${abs(r['pnl']):,.2f}\n"
+
+    # 5. Send to Telegram
     tg_url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     requests.post(tg_url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
 
