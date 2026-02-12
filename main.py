@@ -31,6 +31,18 @@ def fetch_ibkr_xml():
         print(f"Error: {root.find('ErrorMessage').text}")
         return None
 
+def process_and_sendd(xml_content):
+    root = ET.fromstring(xml_content)
+    
+    # DIAGNOSTIC: Print all tags found in the XML to see what IBKR is actually sending
+    print("Tags found in XML:", set([elem.tag for elem in root.iter()]))
+    
+    # Try a more flexible search for NAV
+    nav_node = root.find(".//NetAssetValueNAVInBase")
+    if nav_node is None:
+        # Sometimes it's under a different path depending on the report type
+        print("Warning: Could not find NetAssetValueNAVInBase node")
+
 def process_and_send(xml_content):
     root = ET.fromstring(xml_content)
     
